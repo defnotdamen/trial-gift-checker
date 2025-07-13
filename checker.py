@@ -3,22 +3,26 @@ from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 from random import choice
 from colorama import Fore, init
-init()
+from datetime import datetime
+
+init(autoreset=True)
 
 tokens = [line.rstrip("\n") for line in open("data/tokens.txt", "r")]
 proxies = [line.rstrip("\n") for line in open("data/proxies.txt", "r")]
 
 lock = Lock()
-def save_str(location : str, item : str):
-    lock.acquire()
-    file = open(location, "a")
-    file.write(item+"\n")
-    file.close()
-    lock.release()
+
+def now():
+    return datetime.now().strftime("%H:%M:%S")
+
+def save_str(location: str, item: str):
+    with lock:
+        with open(location, "a") as file:
+            file.write(item + "\n")
 
 class GIFT_CHECKER:
     def __init__(self, token, x):
-        self.full_token : str = token
+        self.full_token: str = token
         self.token = token
         if ":" in self.full_token:
             self.token = self.full_token.split(":")[2]
@@ -42,63 +46,67 @@ class GIFT_CHECKER:
             "x-debug-options": "bugReporterEnabled",
             "x-discord-locale": "en-US",
             "x-discord-timezone": "Asia/Bahrain",
-            "x-super-properties": "eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImVuLVVTIiwiaGFzX2NsaWVudF9tb2RzIjpmYWxzZSwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEzNS4wLjAuMCBTYWZhcmkvNTM3LjM2IiwiYnJvd3Nlcl92ZXJzaW9uIjoiMTM1LjAuMC4wIiwib3NfdmVyc2lvbiI6IjEwIiwicmVmZXJyZXIiOiIiLCJyZWZlcnJpbmdfZG9tYWluIjoiIiwicmVmZXJyZXJfY3VycmVudCI6IiIsInJlZmVycmluZ19kb21haW5fY3VycmVudCI6ImRpc2NvcmQuY29tIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6Mzg5MDA0LCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ=="
+            "x-super-properties": "eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoi..."
         }
-
 
     def check_nitro_gift(self, retries=3):
         try:
             proxy = "http://" + choice(proxies)
-            req = requests.get("https://discord.com/api/v9/users/@me/referrals/eligibility", headers=self.headers, proxies = {
+            req = requests.get("https://discord.com/api/v9/users/@me/referrals/eligibility", headers=self.headers, proxies={
                 "http": proxy,
                 "https": proxy
             })
-            print(req.text)
-            
             if req.status_code == 200:
                 return True, req.json()["referrals_remaining"]
             elif req.status_code in [401, 403, 404]:
                 return None, req.status_code
             return False, False
         except:
-            retries -= 1
-            self.check_nitro_gift(retries)
+            if retries > 0:
+                return self.check_nitro_gift(retries - 1)
             return False, False
 
     def run(self):
         try:
             check, result = self.check_nitro_gift()
+            short_token = self.token[:30] + "..."
             if check:
-                print(f"[{self.thread}] {result} {Fore.GREEN}Gifts Found{Fore.RESET} - {self.token}")
+                with lock:
+                    print(f"\033[1;90m{now()} » \033[1;92mVALID \033[1;97m• {result} gifts found ➔ \033[1;92m[{short_token}]\033[0m")
                 save_str(f"output/{result}_gifts.txt", self.full_token)
-            elif check == None:
+            elif check is None:
                 if result == 401:
-                    print(f"[{self.thread}] Invalid Token - {self.token}")
-                    save_str(f"output/invalids.txt", self.full_token)
-                elif result == 401:
-                    print(f"[{self.thread}] Locked Token - {self.token}")
-                    save_str(f"output/locked.txt", self.full_token)
+                    with lock:
+                        print(f"\033[1;90m{now()} » \033[1;91mINVALID \033[1;97m• Unauthorized ➔ \033[1;91m[{short_token}]\033[0m")
+                    save_str("output/invalids.txt", self.full_token)
+                elif result == 403:
+                    with lock:
+                        print(f"\033[1;90m{now()} » \033[1;93mLOCKED \033[1;97m• Access denied ➔ \033[1;93m[{short_token}]\033[0m")
+                    save_str("output/locked.txt", self.full_token)
                 elif result == 404:
-                    print(f"[{self.thread}] Not Found - {self.token}")
-                    save_str(f"output/no_gifts.txt", self.full_token)
+                    with lock:
+                        print(f"\033[1;90m{now()} » \033[1;94mNO GIFTS \033[1;97m• Not eligible ➔ \033[1;94m[{short_token}]\033[0m")
+                    save_str("output/no_gifts.txt", self.full_token)
             else:
-                print(f"[{self.thread}] Failed Token - {self.token}")
-                save_str(f"output/failed.txt", self.full_token)
+                with lock:
+                    print(f"\033[1;90m{now()} » \033[1;91mERROR \033[1;97m• Request failed ➔ \033[1;91m[{short_token}]\033[0m")
+                save_str("output/failed.txt", self.full_token)
         except Exception as e:
-            print(f"[{self.thread}] Failed Token - {e}")
-            save_str(f"output/failed.txt", self.full_token)
+            short_token = self.token[:30] + "..."
+            with lock:
+                print(f"\033[1;90m{now()} » \033[1;91mERROR \033[1;97m• Exception ➔ \033[1;91m[{short_token}] ➔ {e}\033[0m")
+            save_str("output/failed.txt", self.full_token)
 
 def loop(token, x):
-    class_function = GIFT_CHECKER(token, x)
-    class_function.run()
+    checker = GIFT_CHECKER(token, x)
+    checker.run()
 
 if __name__ == "__main__":
     executor = ThreadPoolExecutor(max_workers=100)
     x = 0
-    for i in tokens:
+    for token in tokens:
         with lock:
             x += 1
-        executor.submit(loop, i, x)
+        executor.submit(loop, token, x)
     executor.shutdown(wait=True)
     input("PRESS ENTER TO EXIT")
-    
